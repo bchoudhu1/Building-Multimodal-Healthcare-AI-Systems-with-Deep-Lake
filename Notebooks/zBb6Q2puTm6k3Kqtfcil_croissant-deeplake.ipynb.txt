@@ -1,0 +1,641 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/steffenvogler/biomedical-courses/blob/main/croissant-deeplake.ipynb\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Croissant plus Deep Lake"
+      ],
+      "metadata": {
+        "id": "tBsrHqpHbTm9"
+      }
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 24,
+      "metadata": {
+        "id": "uZs14AUsbS2T"
+      },
+      "outputs": [],
+      "source": [
+        "!pip install deeplake mlcroissant scikit-image"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "##Restart Colab kernel"
+      ],
+      "metadata": {
+        "id": "RxdYrZVQbyRg"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Make sure to restart Colab runtime after installing dependencies\n",
+        "import os\n",
+        "try:\n",
+        "    import google.colab\n",
+        "    os._exit(0)\n",
+        "except ImportError:\n",
+        "    pass"
+      ],
+      "metadata": {
+        "id": "5W8xTw16b2Bx"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Load libraries"
+      ],
+      "metadata": {
+        "id": "1kUAIzt5o_mf"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from datetime import datetime\n",
+        "import json\n",
+        "import multiprocessing\n",
+        "import numpy as np\n",
+        "import pandas as pd\n",
+        "from tqdm.notebook import tqdm\n",
+        "import os\n",
+        "\n",
+        "import deeplake\n",
+        "from google.colab import userdata\n",
+        "import matplotlib.pyplot as plt\n",
+        "import mlcroissant as mlc\n",
+        "from PIL import Image\n",
+        "from skimage import data, restoration, util"
+      ],
+      "metadata": {
+        "id": "cX7_nd6i1U-W"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "dataset = 'hep2_hf'\n",
+        "org_id = 'bay_224' # CHANGE THIS ACCORDING TO YOU ORG ON https://app.activeloop.ai/\n",
+        "path_to_deeplake_db = f'al://{org_id}/{dataset}'\n",
+        "\n",
+        "path_to_croissant_file = f'/content/{dataset}.json'"
+      ],
+      "metadata": {
+        "id": "cX8HFLXgqhjl"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "For sake of example we just create our own Croissant file. But Croissant files are provided also in Huggingface, Kaggle, OpenML, and TFDS. If you want to share confidential, in-house data you can simply create your own Croissant (either programmatically as below or using the Croissant [Editor](https://huggingface.co/spaces/MLCommons/croissant-editor))"
+      ],
+      "metadata": {
+        "id": "w8xsLgyFWwB7"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "croissant_details = {\n",
+        "  \"@context\": {\n",
+        "    \"@language\": \"en\",\n",
+        "    \"@vocab\": \"https://schema.org/\",\n",
+        "    \"arrayShape\": \"cr:arrayShape\",\n",
+        "    \"citeAs\": \"cr:citeAs\",\n",
+        "    \"column\": \"cr:column\",\n",
+        "    \"conformsTo\": \"dct:conformsTo\",\n",
+        "    \"cr\": \"http://mlcommons.org/croissant/\",\n",
+        "    \"data\": {\n",
+        "      \"@id\": \"cr:data\",\n",
+        "      \"@type\": \"@json\"\n",
+        "    },\n",
+        "    \"dataBiases\": \"cr:dataBiases\",\n",
+        "    \"dataCollection\": \"cr:dataCollection\",\n",
+        "    \"dataType\": {\n",
+        "      \"@id\": \"cr:dataType\",\n",
+        "      \"@type\": \"@vocab\"\n",
+        "    },\n",
+        "    \"dct\": \"http://purl.org/dc/terms/\",\n",
+        "    \"extract\": \"cr:extract\",\n",
+        "    \"field\": \"cr:field\",\n",
+        "    \"fileProperty\": \"cr:fileProperty\",\n",
+        "    \"fileObject\": \"cr:fileObject\",\n",
+        "    \"fileSet\": \"cr:fileSet\",\n",
+        "    \"format\": \"cr:format\",\n",
+        "    \"includes\": \"cr:includes\",\n",
+        "    \"isArray\": \"cr:isArray\",\n",
+        "    \"isLiveDataset\": \"cr:isLiveDataset\",\n",
+        "    \"jsonPath\": \"cr:jsonPath\",\n",
+        "    \"key\": \"cr:key\",\n",
+        "    \"md5\": \"cr:md5\",\n",
+        "    \"parentField\": \"cr:parentField\",\n",
+        "    \"path\": \"cr:path\",\n",
+        "    \"personalSensitiveInformation\": \"cr:personalSensitiveInformation\",\n",
+        "    \"recordSet\": \"cr:recordSet\",\n",
+        "    \"references\": \"cr:references\",\n",
+        "    \"regex\": \"cr:regex\",\n",
+        "    \"repeated\": \"cr:repeated\",\n",
+        "    \"replace\": \"cr:replace\",\n",
+        "    \"sc\": \"https://schema.org/\",\n",
+        "    \"separator\": \"cr:separator\",\n",
+        "    \"source\": \"cr:source\",\n",
+        "    \"subField\": \"cr:subField\",\n",
+        "    \"transform\": \"cr:transform\"\n",
+        "  },\n",
+        "  \"@type\": \"sc:Dataset\",\n",
+        "  \"distribution\": [\n",
+        "    {\n",
+        "      \"contentUrl\": \"https://huggingface.co/datasets/Genius-Society/HEp2/resolve/main/data.zip?download=true\",\n",
+        "      \"contentSize\": \"54.4 MB\",\n",
+        "      \"md5\": \"EP8X2YvpJGbTqIWuy/lo+w==\",\n",
+        "      \"encodingFormat\": \"application/zip\",\n",
+        "      \"@id\": \"data.zip\",\n",
+        "      \"@type\": \"cr:FileObject\",\n",
+        "      \"name\": \"data.zip\",\n",
+        "      \"description\": \"he HEp-2 (Human Epithelial type 2) dataset is a widely used benchmark in the field of medical image analysis, especially for the task of antinuclear antibody (ANA) pattern classification. The dataset contains microscopic images of HEp-2 cells stained with fluorescence, demonstrating multiple patterns of autoantibody binding associated with various autoimmune diseases. The HEp-2 dataset is utilized by researchers and practitioners to develop and evaluate algorithms for automated ANA pattern recognition to aid in the diagnosis of autoimmune diseases. The intricate patterns in this dataset test the robustness of computational models, making it a valuable resource for advancing the understanding of autoimmune diseases and the development of advanced medical image analysis techniques.\"\n",
+        "    },\n",
+        "    {\n",
+        "      \"includes\": \"*.txt\",\n",
+        "      \"containedIn\": {\n",
+        "        \"@id\": \"data.zip\"\n",
+        "      },\n",
+        "      \"encodingFormat\": \"text/txt\",\n",
+        "      \"@id\": \"image_labels\",\n",
+        "      \"@type\": \"cr:FileSet\",\n",
+        "      \"name\": \"image_labels\"\n",
+        "    },\n",
+        "    {\n",
+        "      \"includes\": \"*.**g\",\n",
+        "      \"containedIn\": {\n",
+        "        \"@id\": \"data.zip\"\n",
+        "      },\n",
+        "      \"encodingFormat\": \"image/png\",\n",
+        "      \"@id\": \"image-files\",\n",
+        "      \"@type\": \"cr:FileSet\",\n",
+        "      \"name\": \"image/png files\",\n",
+        "      \"description\": \"image/png files contained in data.zip\"\n",
+        "    }\n",
+        "  ],\n",
+        "  \"recordSet\": [\n",
+        "    {\n",
+        "      \"@type\": \"cr:RecordSet\",\n",
+        "      \"@id\": \"images\",\n",
+        "      \"name\": \"images\",\n",
+        "      \"key\": {\n",
+        "        \"@id\": \"img_id\"\n",
+        "      },\n",
+        "      \"field\": [\n",
+        "        {\n",
+        "          \"@type\": \"cr:Field\",\n",
+        "          \"@id\": \"images/image_filename\",\n",
+        "          \"name\": \"images/image_filename\",\n",
+        "          \"description\": \"The filename of the image. eg: COCO_train2014_000000000003.jpg\",\n",
+        "          \"dataType\": \"sc:Text\",\n",
+        "          \"source\": {\n",
+        "            \"fileSet\": {\n",
+        "              \"@id\": \"image-files\"\n",
+        "            },\n",
+        "            \"extract\": {\n",
+        "              \"fileProperty\": \"filename\"\n",
+        "            }\n",
+        "          }\n",
+        "        },\n",
+        "        {\n",
+        "          \"@type\": \"cr:Field\",\n",
+        "          \"@id\": \"images/image_content\",\n",
+        "          \"name\": \"images/image_content\",\n",
+        "          \"description\": \"The content of the image.\",\n",
+        "          \"dataType\": \"sc:ImageObject\",\n",
+        "          \"source\": {\n",
+        "            \"fileSet\": {\n",
+        "              \"@id\": \"image-files\"\n",
+        "            },\n",
+        "            \"extract\": {\n",
+        "              \"fileProperty\": \"content\"\n",
+        "            }\n",
+        "          }\n",
+        "        },\n",
+        "          {\n",
+        "          \"@type\": \"cr:Field\",\n",
+        "          \"@id\": \"images/label\",\n",
+        "          \"name\": \"images/label\",\n",
+        "          \"dataType\": [\n",
+        "            \"sc:Text\"\n",
+        "          ],\n",
+        "          \"source\": {\n",
+        "            \"fileSet\": {\n",
+        "              \"@id\": \"image-files\"\n",
+        "            },\n",
+        "            \"extract\": {\n",
+        "              \"fileProperty\": \"fullpath\"\n",
+        "            },\n",
+        "            \"transform\": {\n",
+        "              \"regex\": \"^.*/(.*)/.*..*$\"\n",
+        "            }\n",
+        "          }\n",
+        "        }\n",
+        "      ]\n",
+        "    }\n",
+        "  ],\n",
+        "  \"conformsTo\": \"http://mlcommons.org/croissant/1.1\",\n",
+        "  \"name\": \"HEp2\",\n",
+        "  \"description\": \"\\n\\t\\n\\t\\t\\n\\t\\tDataset card for HEp2\\n\\t\\n\\nThe HEp-2 (Human Epithelial type 2) dataset is a widely used benchmark in the field of medical image analysis, especially for the task of antinuclear antibody (ANA) pattern classification. The dataset contains microscopic images of HEp-2 cells stained with fluorescence, demonstrating multiple patterns of autoantibody binding associated with various autoimmune diseases. The HEp-2 dataset is utilized by researchers and practitioners to develop and evaluate… See the full description on the dataset page: https://huggingface.co/datasets/Genius-Society/HEp2.\",\n",
+        "  \"alternateName\": [\n",
+        "    \"Genius-Society/HEp2\",\n",
+        "    \"HEp-2 Cell\"\n",
+        "  ],\n",
+        "  \"creator\": {\n",
+        "    \"@type\": \"Organization\",\n",
+        "    \"name\": \"Genius Society\",\n",
+        "    \"url\": \"https://huggingface.co/Genius-Society\"\n",
+        "  },\n",
+        "  \"keywords\": [\n",
+        "    \"image-classification\",\n",
+        "    \"English\",\n",
+        "    \"mit\",\n",
+        "    \"10K - 100K\",\n",
+        "    \"imagefolder\",\n",
+        "    \"Image\",\n",
+        "    \"Datasets\",\n",
+        "    \"Croissant\",\n",
+        "    \"arxiv:1504.02531\",\n",
+        "    \"🇺🇸 Region: US\",\n",
+        "    \"biology\",\n",
+        "    \"medical\"\n",
+        "  ],\n",
+        "  \"license\": \"https://choosealicense.com/licenses/mit/\",\n",
+        "  \"url\": \"https://huggingface.co/datasets/Genius-Society/HEp2\"\n",
+        "}\n",
+        "\n",
+        "with open(os.path.basename(path_to_croissant_file), \"w\") as f:\n",
+        "    json.dump(croissant_details, f, indent=4)\n",
+        "\n",
+        "print(f\"{path_to_croissant_file} created successfully!\")"
+      ],
+      "metadata": {
+        "id": "FqXdYRk9WybF"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "dataset = mlc.Dataset(jsonld=path_to_croissant_file)\n",
+        "metadata = dataset.metadata.to_json()"
+      ],
+      "metadata": {
+        "id": "I3eU8iEOWOSB"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Check out all available metadata items\n",
+        "print(\"## Available metadata ##\")\n",
+        "print(\"\\n\")\n",
+        "for key in metadata:\n",
+        "  print(key)\n",
+        "\n",
+        "print(2*\"\\n\")\n",
+        "print(f\"Name of the dataset: {metadata['name']}\\n\\nDescription: {metadata['description'][:150]} ...\")"
+      ],
+      "metadata": {
+        "id": "buT9XoOLaPrE"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "##Download data defined in croissant.json and save to Deeplake object"
+      ],
+      "metadata": {
+        "id": "L0q-RFe1b6P-"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "records_loaded = dataset.records(record_set=\"images\")\n",
+        "\n",
+        "print(\"number of images in the dataset: {}\".format(len(list(records_loaded))))\n",
+        "\n",
+        "print(\"do sanity check...\")\n",
+        "for i, record in enumerate(records_loaded):\n",
+        "  img = record['images/image_content']\n",
+        "  # filename = record['images/image_filename'].decode(\"utf-8\")\n",
+        "  # img.save(filename, \"PNG\")\n",
+        "  print(\"index {} is file \\\"{}\\\" with label \\\"{}\\\" and image shape {}\".format(i, record['images/image_filename'].decode(\"utf-8\"), record['images/label'].decode(\"utf-8\"), np.asarray(img).shape))\n",
+        "  if i > 2:\n",
+        "    break"
+      ],
+      "metadata": {
+        "id": "Dtjdx-fc1gjc"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "TO-DO: Get an API token from https://app.activeloop.ai/ and add as a secret to the colab secret manager. Name it ACTIVELOOP_TOKEN\n",
+        "\n",
+        "Below code is taking the Croissant 🥐 file meant for comprehensive data sharing and turns into a general-purpose Deep Lake object.\n",
+        "\n",
+        "The best of two worlds 💪!"
+      ],
+      "metadata": {
+        "id": "eM4hSQQBhTJM"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "start_time = datetime.now()\n",
+        "\n",
+        "try:\n",
+        "    deeplake.delete(path_to_deeplake_db, token=userdata.get('ACTIVELOOP_TOKEN'))\n",
+        "except Exception as e:\n",
+        "    print(f\"Could not delete dataset {path_to_deeplake_db}: {e}\")\n",
+        "    pass\n",
+        "\n",
+        "ds = deeplake.create(path_to_deeplake_db, token = userdata.get('ACTIVELOOP_TOKEN'))\n",
+        "\n",
+        "num_cpu = multiprocessing.cpu_count()\n",
+        "print (\"Processing with {} cpus\".format(num_cpu))\n",
+        "\n",
+        "for key in metadata:\n",
+        "  if key == 'recordSet': continue\n",
+        "  print(f\"Adding Croissant metadata to deeplake DB: {key}\")\n",
+        "  croissant_obj = metadata[key]\n",
+        "  if isinstance(croissant_obj, datetime):\n",
+        "    croissant_obj = croissant_obj.strftime(\"%Y-%m-%d %H:%M:%S.%f\")\n",
+        "  ds.metadata[key] = croissant_obj\n",
+        "\n",
+        "record_sets = \", \".join([f\"`{rs.id}`\" for rs in dataset.metadata.record_sets])\n",
+        "\n",
+        "record_sets = [f\"{rs.id}\" for rs in dataset.metadata.record_sets]\n",
+        "\n",
+        "for i in record_sets:\n",
+        "  ds.add_column(\"record_set\", \"text\")\n",
+        "  ds.add_column(\"filename\", \"text\")\n",
+        "  ds.add_column(\"label\", \"text\")\n",
+        "  ds.add_column(\"image\", deeplake.types.Image(sample_compression=\"png\"))\n",
+        "\n",
+        "  records_loaded = dataset.records(record_set=i)\n",
+        "  print(\"number of images in the dataset: {}\".format(len(list(records_loaded))))\n",
+        "  for j,record in tqdm(enumerate(records_loaded), total=len(list(records_loaded))):\n",
+        "    arr = np.asarray(record['images/image_content'])\n",
+        "    new_arr = np.expand_dims(arr, axis=-1)\n",
+        "\n",
+        "    if len(new_arr.shape) == 2: continue\n",
+        "    ds.append([{\n",
+        "        \"record_set\": i,\n",
+        "        \"filename\": record['images/image_filename'].decode(\"utf-8\"),\n",
+        "        \"label\": record['images/label'].decode(\"utf-8\"),\n",
+        "        \"image\": new_arr\n",
+        "    }])\n",
+        "\n",
+        "ds.commit(\"initial commit after importing from Croissant\")\n",
+        "\n",
+        "stop_time = datetime.now()\n",
+        "execution_time = stop_time - start_time\n",
+        "\n",
+        "print(f\"Execution time: {execution_time}\")\n",
+        "ds.summary()"
+      ],
+      "metadata": {
+        "id": "OkcfgwFxqDBw"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Sanity check to load a file and display it"
+      ],
+      "metadata": {
+        "id": "FBrhB8MXqyX_"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "i = 120\n",
+        "\n",
+        "import PIL\n",
+        "from PIL import Image\n",
+        "import matplotlib.pyplot as plt\n",
+        "\n",
+        "print(ds[i][\"filename\"])\n",
+        "print(ds[i][\"label\"])\n",
+        "\n",
+        "array = ds[i][\"image\"]\n",
+        "img = Image.fromarray(np.squeeze(array))\n",
+        "\n",
+        "plt.imshow(img)\n",
+        "plt.axis('off') # Hide axes\n",
+        "plt.show()"
+      ],
+      "metadata": {
+        "id": "oMZjlBAYw7cw"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "print(ds.branches)"
+      ],
+      "metadata": {
+        "id": "M3YZ9HLAngBL"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Create branch\n",
+        "branch = ds.branch(\"bg_subtraction\")\n",
+        "# Open branch\n",
+        "branch_ds = branch.open()"
+      ],
+      "metadata": {
+        "id": "pCDEG0fEgDTl"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "try:\n",
+        "  branch_ds.add_column(\"bg_subtracted\", deeplake.types.Image(sample_compression=\"png\"), )\n",
+        "  branch_ds.add_column(\"bg\", deeplake.types.Image(sample_compression=\"png\"))\n",
+        "except:\n",
+        "  print(\"Columns already exist\")\n",
+        "  pass\n",
+        "\n",
+        "column = branch_ds[\"image\"]\n",
+        "for j,entry in tqdm(enumerate(column), total=len(list(column))):\n",
+        "  background = restoration.rolling_ball(entry, radius = 25)\n",
+        "  result = entry - background\n",
+        "  branch_ds[j][\"bg_subtracted\"] = result\n",
+        "  branch_ds[j][\"bg\"] = background\n",
+        "  if j > 100:\n",
+        "    break\n",
+        "\n",
+        "branch_ds.metadata[\"python-function\"] = \"restoration.rolling_ball(entry, radius = 25)\"\n",
+        "branch_ds.commit(\"rolling ball background subtraction\")\n",
+        "\n",
+        "branch_ds.summary()"
+      ],
+      "metadata": {
+        "id": "CHE6Xg_4gT2B"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "print(branch_ds.branches)\n",
+        "print(branch_ds.metadata.keys())"
+      ],
+      "metadata": {
+        "id": "3roKmxbXwITU"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Sanity check whether background subtraction got actually saved in deep lake object."
+      ],
+      "metadata": {
+        "id": "dOHQjKVl0hlp"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def plot_result(image, background, result):\n",
+        "    fig, ax = plt.subplots(nrows=1, ncols=3)\n",
+        "\n",
+        "    ax[0].imshow(image)\n",
+        "    ax[0].set_title('Original image')\n",
+        "    ax[0].axis('off')\n",
+        "\n",
+        "    ax[1].imshow(background)\n",
+        "    ax[1].set_title('Background')\n",
+        "    ax[1].axis('off')\n",
+        "\n",
+        "    ax[2].imshow(result)\n",
+        "    ax[2].set_title('background subtracted result')\n",
+        "    ax[2].axis('off')\n",
+        "\n",
+        "    fig.tight_layout()\n",
+        "\n",
+        "i = 50\n",
+        "\n",
+        "print(\"result for {}\".format(branch_ds[i][\"filename\"]))\n",
+        "\n",
+        "array = branch_ds[i][\"image\"]\n",
+        "original = Image.fromarray(np.squeeze(array))\n",
+        "\n",
+        "array = branch_ds[i][\"bg\"]\n",
+        "bg = Image.fromarray(np.squeeze(array))\n",
+        "\n",
+        "array = branch_ds[i][\"bg_subtracted\"]\n",
+        "bg_sub = Image.fromarray(np.squeeze(array))\n",
+        "\n",
+        "plot_result(original, bg, bg_sub)\n",
+        "plt.show()"
+      ],
+      "metadata": {
+        "id": "qlqeXHxdu3xp"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "If desired, the newly created brach \"bg_subtraction\" can be merged into the main branch."
+      ],
+      "metadata": {
+        "id": "2EMPHorK02M3"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "print(\"before merging\")\n",
+        "print(10*\"#\")\n",
+        "ds.summary()\n",
+        "\n",
+        "ds.merge(\"bg_subtraction\")\n",
+        "print(\"after merging\")\n",
+        "print(10*\"#\")\n",
+        "ds.summary()"
+      ],
+      "metadata": {
+        "id": "tglOsRxG0uEi"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Never loose track of data lineage and if you wonder which data preprocessing would lead to an increased performance of you favorite classification model, then you are already on your way to do data-centric ML."
+      ],
+      "metadata": {
+        "id": "AcxL_HkA1LT8"
+      }
+    }
+  ]
+}

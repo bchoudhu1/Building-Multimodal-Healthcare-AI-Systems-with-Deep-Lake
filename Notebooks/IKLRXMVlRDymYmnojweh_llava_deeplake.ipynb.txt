@@ -1,0 +1,661 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "gpuType": "T4"
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    },
+    "accelerator": "GPU"
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Chat with you image data"
+      ],
+      "metadata": {
+        "id": "tBsrHqpHbTm9"
+      }
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {
+        "id": "uZs14AUsbS2T"
+      },
+      "outputs": [],
+      "source": [
+        "!pip install --upgrade pip\n",
+        "!pip install --upgrade transformers\n",
+        "!pip install sentencepiece bitsandbytes pillow scipy deeplake mlcroissant"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "##Restart Colab kernel"
+      ],
+      "metadata": {
+        "id": "RxdYrZVQbyRg"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Make sure to restart Colab runtime after installing dependencies\n",
+        "import os\n",
+        "try:\n",
+        "    import google.colab\n",
+        "    os._exit(0)\n",
+        "except ImportError:\n",
+        "    pass"
+      ],
+      "metadata": {
+        "id": "5W8xTw16b2Bx"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Load libraries"
+      ],
+      "metadata": {
+        "id": "1kUAIzt5o_mf"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from datetime import datetime\n",
+        "import multiprocessing\n",
+        "import numpy as np\n",
+        "import pandas as pd\n",
+        "from tqdm.notebook import tqdm\n",
+        "import os\n",
+        "\n",
+        "import deeplake\n",
+        "from google.colab import userdata\n",
+        "import mlcroissant as mlc\n",
+        "import openai\n",
+        "from PIL import Image\n",
+        "import torch\n",
+        "from transformers import AutoProcessor, LlavaForConditionalGeneration, BitsAndBytesConfig, pipeline"
+      ],
+      "metadata": {
+        "id": "cX7_nd6i1U-W"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "For sake of example we just create our own Croissant file. But Croissant files are provided also in Huggingface, Kaggle, OpenML, and TFDS. If you want to share confidential, in-house data you can simply create your own Croissant (either programmatically as below or using the Croissant [Editor](https://huggingface.co/spaces/MLCommons/croissant-editor))"
+      ],
+      "metadata": {
+        "id": "ogVTaZl9zDfk"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import json\n",
+        "\n",
+        "croissant_details = {\n",
+        "  \"@context\": {\n",
+        "    \"@language\": \"en\",\n",
+        "    \"@vocab\": \"https://schema.org/\",\n",
+        "    \"citeAs\": \"cr:citeAs\",\n",
+        "    \"column\": \"cr:column\",\n",
+        "    \"conformsTo\": \"dct:conformsTo\",\n",
+        "    \"cr\": \"http://mlcommons.org/croissant/\",\n",
+        "    \"data\": {\n",
+        "      \"@id\": \"cr:data\",\n",
+        "      \"@type\": \"@json\"\n",
+        "    },\n",
+        "    \"dataBiases\": \"cr:dataBiases\",\n",
+        "    \"dataCollection\": \"cr:dataCollection\",\n",
+        "    \"dataType\": {\n",
+        "      \"@id\": \"cr:dataType\",\n",
+        "      \"@type\": \"@vocab\"\n",
+        "    },\n",
+        "    \"dct\": \"http://purl.org/dc/terms/\",\n",
+        "    \"extract\": \"cr:extract\",\n",
+        "    \"field\": \"cr:field\",\n",
+        "    \"fileProperty\": \"cr:fileProperty\",\n",
+        "    \"fileObject\": \"cr:fileObject\",\n",
+        "    \"fileSet\": \"cr:fileSet\",\n",
+        "    \"format\": \"cr:format\",\n",
+        "    \"includes\": \"cr:includes\",\n",
+        "    \"isEnumeration\": \"cr:isEnumeration\",\n",
+        "    \"jsonPath\": \"cr:jsonPath\",\n",
+        "    \"key\": \"cr:key\",\n",
+        "    \"md5\": \"cr:md5\",\n",
+        "    \"parentField\": \"cr:parentField\",\n",
+        "    \"path\": \"cr:path\",\n",
+        "    \"personalSensitiveInformation\": \"cr:personalSensitiveInformation\",\n",
+        "    \"recordSet\": \"cr:recordSet\",\n",
+        "    \"references\": \"cr:references\",\n",
+        "    \"regex\": \"cr:regex\",\n",
+        "    \"repeated\": \"cr:repeated\",\n",
+        "    \"replace\": \"cr:replace\",\n",
+        "    \"sc\": \"https://schema.org/\",\n",
+        "    \"separator\": \"cr:separator\",\n",
+        "    \"source\": \"cr:source\",\n",
+        "    \"subField\": \"cr:subField\",\n",
+        "    \"transform\": \"cr:transform\",\n",
+        "    \"wd\": \"https://www.wikidata.org/wiki/\"\n",
+        "  },\n",
+        "  \"alternateName\": \"\",\n",
+        "  \"conformsTo\": \"http://mlcommons.org/croissant/1.0\",\n",
+        "  \"license\": {\n",
+        "    \"@type\": \"sc:CreativeWork\",\n",
+        "    \"name\": \"Database: Open Database, Contents: Database Contents\",\n",
+        "    \"url\": \"http://opendatacommons.org/licenses/dbcl/1.0/\"\n",
+        "  },\n",
+        "  \"distribution\": [\n",
+        "    {\n",
+        "      \"contentUrl\": \"https://www.kaggle.com/api/v1/datasets/download/diayruldip/carinocroma?datasetVersionNumber=1\",\n",
+        "      \"contentSize\": \"118.616 MB\",\n",
+        "      \"md5\": \"PwaKTf5UOILk7VreP/ZGNQ==\",\n",
+        "      \"encodingFormat\": \"application/zip\",\n",
+        "      \"@id\": \"archive.zip\",\n",
+        "      \"@type\": \"cr:FileObject\",\n",
+        "      \"name\": \"archive.zip\",\n",
+        "      \"description\": \"Archive containing all the contents of the Chest CT Scan Image Lung dataset\"\n",
+        "    },\n",
+        "    {\n",
+        "      \"includes\": \"*.txt\",\n",
+        "      \"containedIn\": {\n",
+        "        \"@id\": \"archive.zip\"\n",
+        "      },\n",
+        "      \"encodingFormat\": \"text/txt\",\n",
+        "      \"@id\": \"image_labels\",\n",
+        "      \"@type\": \"cr:FileSet\",\n",
+        "      \"name\": \"image_labels\"\n",
+        "    },\n",
+        "    {\n",
+        "      \"includes\": \"*.**g\",\n",
+        "      \"containedIn\": {\n",
+        "        \"@id\": \"archive.zip\"\n",
+        "      },\n",
+        "      \"encodingFormat\": \"image/jpeg\",\n",
+        "      \"@id\": \"image-files\",\n",
+        "      \"@type\": \"cr:FileSet\",\n",
+        "      \"name\": \"image/jpeg files\",\n",
+        "      \"description\": \"image/jpeg files contained in archive.zip\"\n",
+        "    }\n",
+        "  ],\n",
+        "  \"recordSet\": [\n",
+        "    {\n",
+        "      \"@type\": \"cr:RecordSet\",\n",
+        "      \"@id\": \"images\",\n",
+        "      \"name\": \"images\",\n",
+        "      \"key\": {\n",
+        "        \"@id\": \"img_id\"\n",
+        "      },\n",
+        "      \"field\": [\n",
+        "        {\n",
+        "          \"@type\": \"cr:Field\",\n",
+        "          \"@id\": \"images/image_filename\",\n",
+        "          \"name\": \"images/image_filename\",\n",
+        "          \"description\": \"The filename of the image. eg: COCO_train2014_000000000003.jpg\",\n",
+        "          \"dataType\": \"sc:Text\",\n",
+        "          \"source\": {\n",
+        "            \"fileSet\": {\n",
+        "              \"@id\": \"image-files\"\n",
+        "            },\n",
+        "            \"extract\": {\n",
+        "              \"fileProperty\": \"filename\"\n",
+        "            }\n",
+        "          }\n",
+        "        },\n",
+        "        {\n",
+        "          \"@type\": \"cr:Field\",\n",
+        "          \"@id\": \"images/image_content\",\n",
+        "          \"name\": \"images/image_content\",\n",
+        "          \"description\": \"The content of the image.\",\n",
+        "          \"dataType\": \"sc:ImageObject\",\n",
+        "          \"source\": {\n",
+        "            \"fileSet\": {\n",
+        "              \"@id\": \"image-files\"\n",
+        "            },\n",
+        "            \"extract\": {\n",
+        "              \"fileProperty\": \"content\"\n",
+        "            }\n",
+        "          }\n",
+        "        },\n",
+        "        {\n",
+        "          \"@type\": \"cr:Field\",\n",
+        "          \"@id\": \"images/split\",\n",
+        "          \"name\": \"images/split\",\n",
+        "          \"dataType\": [\n",
+        "            \"sc:Text\"\n",
+        "          ],\n",
+        "          \"source\": {\n",
+        "            \"fileSet\": {\n",
+        "              \"@id\": \"image-files\"\n",
+        "            },\n",
+        "            \"extract\": {\n",
+        "              \"fileProperty\": \"fullpath\"\n",
+        "            },\n",
+        "            \"transform\": {\n",
+        "              \"regex\": \"^.*/(train|valid|test).*$\"\n",
+        "            }\n",
+        "          }\n",
+        "        },\n",
+        "                {\n",
+        "          \"@type\": \"cr:Field\",\n",
+        "          \"@id\": \"images/label\",\n",
+        "          \"name\": \"images/label\",\n",
+        "          \"dataType\": [\n",
+        "            \"sc:Text\"\n",
+        "          ],\n",
+        "          \"source\": {\n",
+        "            \"fileSet\": {\n",
+        "              \"@id\": \"image-files\"\n",
+        "            },\n",
+        "            \"extract\": {\n",
+        "              \"fileProperty\": \"fullpath\"\n",
+        "            },\n",
+        "            \"transform\": {\n",
+        "              \"regex\": \"^.*/(.*)/.*..*$\"\n",
+        "            }\n",
+        "          }\n",
+        "        }\n",
+        "      ]\n",
+        "    }\n",
+        "  ],\n",
+        "  \"version\": 1,\n",
+        "  \"keywords\": [\n",
+        "    \"subject > health and fitness > health > health conditions > cancer\"\n",
+        "  ],\n",
+        "  \"isAccessibleForFree\": \"true\",\n",
+        "  \"includedInDataCatalog\": {\n",
+        "    \"@type\": \"sc:DataCatalog\",\n",
+        "    \"name\": \"Kaggle\",\n",
+        "    \"url\": \"https://www.kaggle.com\"\n",
+        "  },\n",
+        "  \"creator\": {\n",
+        "    \"@type\": \"sc:Person\",\n",
+        "    \"name\": \"Diayrul Dip\",\n",
+        "    \"url\": \"/diayruldip\",\n",
+        "    \"image\": \"https://storage.googleapis.com/kaggle-avatars/thumbnails/default-thumb.png\"\n",
+        "  },\n",
+        "  \"publisher\": {\n",
+        "    \"@type\": \"sc:Organization\",\n",
+        "    \"name\": \"Kaggle\",\n",
+        "    \"url\": \"https://www.kaggle.com/organizations/kaggle\",\n",
+        "    \"image\": \"https://storage.googleapis.com/kaggle-organizations/4/thumbnail.png\"\n",
+        "  },\n",
+        "  \"thumbnailUrl\": \"https://storage.googleapis.com/kaggle-datasets-images/new-version-temp-images/default-backgrounds-45.png-10561992/dataset-card.png\",\n",
+        "  \"dateModified\": \"2022-05-17T06:09:27.707\",\n",
+        "  \"datePublished\": \"2022-05-17T06:09:27.707\",\n",
+        "  \"@type\": \"sc:Dataset\",\n",
+        "  \"name\": \"Chest CT Scan Image Lung\",\n",
+        "  \"url\": \"https://www.kaggle.com/datasets/diayruldip/carinocroma/versions/1\",\n",
+        "  \"description\": \"\\n**Data**\\nImages are not in dcm format, the images are in jpg or png to fit the model\\nData contain 3 chest cancer types which are Adenocarcinoma,Large cell carcinoma, Squamous cell carcinoma , and 1 folder for the normal cell\\nData folder is the main folder that contain all the step folders\\ninside Data folder are test , train , valid\\n\\ntest represent testing set\\ntrain represent training set\\nvalid represent validation set\\ntraining set is 70%\\ntesting set is 20%\\nvalidation set is 10%\\n\\n**Adenocarcinoma**\\nAdenocarcinoma of the lung: Lung adenocarcinoma is the most common form of lung cancer\\naccounting for 30 percent of all cases overall and about 40 percent\\nof all non-small cell lung cancer occurrences. Adenocarcinomas are\\nfound in several common cancers, including breast, prostate and colorectal.\\nAdenocarcinomas of the lung are found in the outer region of the lung\\nin glands that secrete mucus and help us breathe.\\nSymptoms include coughing, hoarseness, weight loss and weakness.\\n\\n**Large cell carcinoma**\\nLarge-cell undifferentiated carcinoma: Large-cell undifferentiated carcinoma lung cancer grows and spreads quickly and can\\nbe found anywhere in the lung. This type of lung cancer usually accounts for 10\\nto 15 percent of all cases of NSCLC.\\nLarge-cell undifferentiated carcinoma tends to grow and spread quickly.\\n**\\nSquamous cell carcinoma**\\nSquamous cell: This type of lung cancer is found centrally in the lung,\\nwhere the larger bronchi join the trachea to the lung,\\nor in one of the main airway branches.\\nSquamous cell lung cancer is responsible for about 30 percent of all non-small\\ncell lung cancers, and is generally linked to smoking.\\n\\nAnd the last folder is the normal CT-Scan images\\n\\n**Acknowledgements**\\nWe wouldn't be here without the help of others and the resources we found.\\nthanks for all of my team and the people who supported us\\n\\nInspiration\\nI want to hear all your feedback\"\n",
+        "}\n",
+        "\n",
+        "with open(\"chest_ct_kaggle.json\", \"w\") as f:\n",
+        "    json.dump(croissant_details, f, indent=4)\n",
+        "\n",
+        "print(\"chest_ct_kaggle.json created successfully!\")"
+      ],
+      "metadata": {
+        "id": "U9XNvVaCzCPx"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "dataset = 'chest_ct'\n",
+        "org_id = 'bay_224' # CHANGE THIS ACCORDING TO YOU ORG ON https://app.activeloop.ai/\n",
+        "path_to_deeplake_db = f'al://{org_id}/{dataset}'\n",
+        "\n",
+        "path_to_croissant_file = '/content/chest_ct_kaggle.json'"
+      ],
+      "metadata": {
+        "id": "cX8HFLXgqhjl"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "dataset = mlc.Dataset(jsonld=path_to_croissant_file)\n",
+        "metadata = dataset.metadata.to_json()"
+      ],
+      "metadata": {
+        "id": "I3eU8iEOWOSB"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Check out all available metadata items\n",
+        "print(\"## Available metadata ##\")\n",
+        "for key in metadata:\n",
+        "  print(key)\n",
+        "\n",
+        "print(2*\"\\n\")\n",
+        "print(f\"Name of the dataset: {metadata['name']}\\n\\nDescription: {metadata['description'][:150]} ...\")"
+      ],
+      "metadata": {
+        "id": "buT9XoOLaPrE"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "##Download data defined in Croissant .json and save to Deeplake object"
+      ],
+      "metadata": {
+        "id": "L0q-RFe1b6P-"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "records_loaded = dataset.records(record_set=\"images\")\n",
+        "print(\"number of images in the dataset: {}\".format(len(list(records_loaded))))\n",
+        "\n",
+        "for i, record in enumerate(records_loaded):\n",
+        "  #img = record['images/image_content']\n",
+        "  #filename = record['images/image_filename'].decode(\"utf-8\")\n",
+        "  #img.save(filename, \"PNG\")\n",
+        "  print(\"index {} is file \\\"{}\\\" with label {} in split {}\".format(i, record['images/image_filename'].decode(\"utf-8\"), record['images/label'].decode(\"utf-8\"), record['images/split'].decode(\"utf-8\")))\n",
+        "  if i > 2:\n",
+        "    break"
+      ],
+      "metadata": {
+        "id": "Dtjdx-fc1gjc"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "TO-DO: Get an API token from https://app.activeloop.ai/ and add as a secret to the colab secret manager. Name it ACTIVELOOP_TOKEN"
+      ],
+      "metadata": {
+        "id": "s4qZxd6G4V51"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Below code is taking the Croissant 🥐 file meant for comprehensive data sharing and turns into a general-purpose Deep Lake object.\n",
+        "\n",
+        "The best of two worlds 💪!"
+      ],
+      "metadata": {
+        "id": "W5Zd4w4f40nS"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "start_time = datetime.now()\n",
+        "\n",
+        "try:\n",
+        "    deeplake.delete(path_to_deeplake_db, token=userdata.get('ACTIVELOOP_TOKEN'))\n",
+        "except Exception as e:\n",
+        "    print(f\"Could not delete dataset {path_to_deeplake_db}: {e}\")\n",
+        "    pass\n",
+        "\n",
+        "ds = deeplake.create(path_to_deeplake_db, token = userdata.get('ACTIVELOOP_TOKEN'))\n",
+        "\n",
+        "num_cpu = multiprocessing.cpu_count()\n",
+        "print (\"Processing with {} cpus\".format(num_cpu))\n",
+        "\n",
+        "for key in metadata:\n",
+        "  if key == 'recordSet': continue\n",
+        "  print(f\"Adding Croissant metadata to deeplake DB: {key}\")\n",
+        "  croissant_obj = metadata[key]\n",
+        "  if isinstance(croissant_obj, datetime):\n",
+        "    croissant_obj = croissant_obj.strftime(\"%Y-%m-%d %H:%M:%S.%f\")\n",
+        "  ds.metadata[key] = croissant_obj\n",
+        "\n",
+        "record_sets = \", \".join([f\"`{rs.id}`\" for rs in dataset.metadata.record_sets])\n",
+        "\n",
+        "record_sets = [f\"{rs.id}\" for rs in dataset.metadata.record_sets]\n",
+        "\n",
+        "for i in record_sets:\n",
+        "  ds.add_column(\"record_set\", \"text\")\n",
+        "  ds.add_column(\"filename\", \"text\")\n",
+        "  ds.add_column(\"split\", \"text\")\n",
+        "  ds.add_column(\"label\", \"text\")\n",
+        "  ds.add_column(\"description\", \"text\")\n",
+        "  ds.add_column(\"embedding\", dtype=deeplake.types.Embedding(1024))\n",
+        "  ds.add_column(\"image\", deeplake.types.Image(sample_compression=\"png\"))\n",
+        "\n",
+        "  records_loaded = dataset.records(record_set=i)\n",
+        "  print(\"number of images in the dataset: {}\".format(len(list(records_loaded))))\n",
+        "  for j,record in tqdm(enumerate(records_loaded), total=len(list(records_loaded))):\n",
+        "    arr = np.asarray(record['images/image_content'])\n",
+        "    if len(arr.shape) == 2: continue\n",
+        "    ds.append([{\n",
+        "        \"record_set\": i,\n",
+        "        \"filename\": record['images/image_filename'].decode(\"utf-8\"),\n",
+        "        \"split\": record['images/split'].decode(\"utf-8\"),\n",
+        "        \"label\": record['images/label'].decode(\"utf-8\"),\n",
+        "        \"description\": \"to be added\",\n",
+        "        \"embedding\": np.zeros(1024),\n",
+        "        \"image\": np.asarray(record['images/image_content'])\n",
+        "    }])\n",
+        "    if j > 20: # Comment out if you want to process the entire dataset\n",
+        "      break\n",
+        "\n",
+        "stop_time = datetime.now()\n",
+        "execution_time = stop_time - start_time\n",
+        "\n",
+        "print(f\"Execution time: {execution_time}\")\n",
+        "ds.summary()"
+      ],
+      "metadata": {
+        "id": "OkcfgwFxqDBw"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# Example: Bootstraping image description and saving them for future use\n",
+        "Let's extract an image for some downstream task (here: LLaVa image description) and save the description back to the Deep Lake object. By this logic one can stepwise enrich limited datasets with context from other sources."
+      ],
+      "metadata": {
+        "id": "KZvpNU1t5ZqV"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "torch.cuda.empty_cache()\n",
+        "torch.cuda.ipc_collect()\n",
+        "\n",
+        "quantization_config = BitsAndBytesConfig(\n",
+        "    load_in_4bit=True,\n",
+        "    bnb_4bit_compute_dtype=torch.float16\n",
+        ")\n",
+        "\n",
+        "model_id = \"llava-hf/llava-onevision-qwen2-0.5b-si-hf\"\n",
+        "\n",
+        "pipe = pipeline(\"image-text-to-text\",\n",
+        "               model=model_id,\n",
+        "               model_kwargs={\"quantization_config\": quantization_config})\n",
+        "\n",
+        "for image_id in tqdm(range(len(ds)), total=len(ds)):\n",
+        "  imgInput = Image.fromarray(ds[image_id][\"image\"]).convert(\"RGB\")\n",
+        "\n",
+        "  messages = [\n",
+        "    {\n",
+        "        \"role\": \"user\",\n",
+        "        \"content\": [\n",
+        "            {\"type\": \"image\"},\n",
+        "            {\"type\": \"text\", \"text\": \"Describe this image? Use complicated medical jargon\"},\n",
+        "        ],\n",
+        "    },\n",
+        "  ]\n",
+        "\n",
+        "  outputs = pipe(\n",
+        "      images=imgInput,\n",
+        "      text=messages,\n",
+        "      generate_kwargs={\"max_new_tokens\": 500}\n",
+        "  )\n",
+        "\n",
+        "  # Access the 'generated_text' key and save it back to the deep lake DB\n",
+        "  #print(f\"getting description for image {image_id}\")\n",
+        "  if outputs and outputs[0] and 'generated_text' in outputs[0]:\n",
+        "      generated_text_list = outputs[0]['generated_text']\n",
+        "      for item in generated_text_list:\n",
+        "          if 'content' in item:\n",
+        "              #print(item[\"content\"])\n",
+        "              ds[image_id][\"description\"] = str(item[\"content\"])\n",
+        "\n",
+        "  else:\n",
+        "      print(\"Could not find 'generated_text' in the output.\")"
+      ],
+      "metadata": {
+        "id": "aCLCKQ5qiy69"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Next the description is turned into embeddings. The MTEB leaderboard gives an overview of the relevant and best performing models. See [link](https://huggingface.co/spaces/mteb/leaderboard)"
+      ],
+      "metadata": {
+        "id": "32S8YsyTRmu_"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from transformers import AutoModel, AutoTokenizer\n",
+        "import torch\n",
+        "\n",
+        "# Load the pre-trained model and tokenizer\n",
+        "tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen3-Embedding-0.6B', padding_side='left')\n",
+        "model = AutoModel.from_pretrained('Qwen/Qwen3-Embedding-0.6B')\n",
+        "\n",
+        "def embedding_function(texts):\n",
+        "    if isinstance(texts, str):\n",
+        "        texts = [texts]\n",
+        "\n",
+        "    # Tokenize the texts\n",
+        "    encoded_input = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')\n",
+        "\n",
+        "    # Compute embeddings\n",
+        "    with torch.no_grad():\n",
+        "        model_output = model(**encoded_input)\n",
+        "\n",
+        "    # Mean pooling - take attention mask into account for correct averaging\n",
+        "    def mean_pooling(model_output, attention_mask):\n",
+        "        token_embeddings = model_output[0]  # First element of model_output contains all token embeddings\n",
+        "        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()\n",
+        "        return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)\n",
+        "\n",
+        "    sentence_embeddings = mean_pooling(model_output, encoded_input['attention_mask'])\n",
+        "\n",
+        "    return sentence_embeddings.tolist()\n",
+        "\n",
+        "for i in range(len(ds)):\n",
+        "    description = ds[i][\"description\"]\n",
+        "    if description: # Check if description is not empty\n",
+        "        embeddings = embedding_function(description)\n",
+        "        ds[i][\"embedding\"] = embeddings[0] # Assuming you want to store a single embedding per image\n",
+        "    else:\n",
+        "        # Handle cases where description is empty, e.g., set embedding to zeros or None\n",
+        "        ds[i][\"embedding\"] = np.zeros(model.config.hidden_size).tolist() # Assuming model.config.hidden_size gives the embedding dimension\n",
+        "\n",
+        "print(\"Text embeddings created and saved to the 'embedding' column.\")"
+      ],
+      "metadata": {
+        "id": "UxD3ykoQ9XUh"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Query your images\n",
+        "\n",
+        "We have now created our own multi-modal dataset, and thanks to advanced retrieval techniques that are served via Deeplake \"out-of-the-box\" we can use natural language to explore our image dataset. More general description of the method is here [Link](https://docs.deeplake.ai/latest/guide/rag/#chat-with-images)"
+      ],
+      "metadata": {
+        "id": "VbwWuBTPv_FL"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "query = \"trachea\"\n",
+        "embed_query = embedding_function(query)[0]\n",
+        "str_query = \",\".join(str(c) for c in embed_query)"
+      ],
+      "metadata": {
+        "id": "BbDVQn4-GDAe"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "query_vs = f\"\"\"\n",
+        "    SELECT *, cosine_similarity(embedding, ARRAY[{str_query}]) as score\n",
+        "    FROM (\n",
+        "        SELECT *, ROW_NUMBER() AS row_id\n",
+        "    )\n",
+        "    ORDER BY cosine_similarity(embedding, ARRAY[{str_query}]) DESC\n",
+        "\n",
+        "    LIMIT 3\n",
+        "\"\"\"\n",
+        "\n",
+        "view_vs = ds.query(query_vs)\n",
+        "print(view_vs)"
+      ],
+      "metadata": {
+        "id": "Xw55dIVFGJRz"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "for row in view_vs:\n",
+        "    print(f\"filename: {row['filename']} \\ndescription: {row['description']} \\nwith score: {row['score']}\")\n",
+        "    print(10*'#')"
+      ],
+      "metadata": {
+        "id": "x9qrXDejGZ26"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
